@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../App';
-import { mockBackend } from '../services/mockBackend';
+import { generatePinFirebase, db } from '../services/firebase'; // Import Firebase functions
+import { collection, query, where, getDocs } from 'firebase/firestore'; // Import Firestore functions
+// import { mockBackend } from '../services/mockBackend'; // Remove mockBackend import
 import { Machine } from '../types';
 import { ShareIcon } from '../components/Icons';
 
@@ -20,21 +22,36 @@ const ShareAccess: React.FC = () => {
   useEffect(() => {
     if(!machineId) return;
 
-    const currentMachine = mockBackend.getMachine(machineId);
-    if (currentMachine) {
-      setMachine(currentMachine);
-      // Only generate a new PIN if one doesn't exist or is expired
-      if (!currentMachine.pin || Date.now() > currentMachine.pin.expiry) {
-        generateNewPin();
-      } else {
-        setPin(currentMachine.pin.code);
-        setExpiry(currentMachine.pin.expiry);
-        setIsLoading(false);
-      }
-    } else {
-      setIsLoading(false);
-    }
-  }, [machineId]);
+    const currentMachine = machines.find(m => m.id === machineId);
+    setMachine(currentMachine || null);
+
+    const fetchPin = async () => {
+        setIsLoading(true);
+        try {
+            const q = query(collection(db, 'activePins'), where('machineId', '==', machineId));
+            const querySnapshot = await getDocs(q);
+
+            if (!querySnapshot.empty) {
+                const activePinDoc = querySnapshot.docs[0];
+                const activePinData = activePinDoc.data();
+                if (activePinData.expiry > Date.now()) {
+                    setPin(activePinData.pin);
+                    setExpiry(activePinData.expiry);
+                    setIsLoading(false);
+                    return;
+                }
+            }
+            // If no valid PIN found, generate a new one
+            generateNewPin();
+        } catch (error) {
+            console.error("Failed to fetch or generate PIN", error);
+            setIsLoading(false);
+        }
+    };
+
+    fetchPin();
+
+  }, [machineId, machines]); // Depend on machines to re-evaluate when machines data updates
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -43,6 +60,12 @@ const ShareAccess: React.FC = () => {
         const minutes = Math.floor(newTimeLeft / 60000);
         const seconds = Math.floor((newTimeLeft % 60000) / 1000);
         setTimeLeft(`${minutes}m ${seconds.toString().padStart(2, '0')}s`);
+        if (newTimeLeft === 0) {
+            // PIN has expired, clear it
+            setPin(null);
+            setExpiry(null);
+            setTimeLeft('');
+        }
       }
     }, 1000);
     return () => clearInterval(timer);
@@ -52,7 +75,7 @@ const ShareAccess: React.FC = () => {
     if (!machineId) return;
     setIsLoading(true);
     try {
-      const { pin, expiry } = await mockBackend.generatePin(machineId);
+      const { pin, expiry } = await generatePinFirebase(machineId);
       setPin(pin);
       setExpiry(expiry);
     } catch (error) {

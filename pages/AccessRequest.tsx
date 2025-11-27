@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { mockBackend } from '../services/mockBackend';
+import { validateAndActivateFirebase } from '../services/firebase'; // Import Firebase validation
+import { useApp } from '../App'; // Import useApp to get current user
+// import { mockBackend } from '../services/mockBackend'; // Remove mockBackend
 import { Machine } from '../types';
 import { WifiIcon, ShareIcon } from '../components/Icons';
 
 const AccessRequest: React.FC = () => {
   const { machineId } = useParams<{ machineId: string }>();
   const navigate = useNavigate();
+  const { machines, user } = useApp(); // Get machines and user from AppContext
   
   const [machine, setMachine] = useState<Machine | null>(null);
   const [duration, setDuration] = useState<number>(1);
@@ -18,13 +21,13 @@ const AccessRequest: React.FC = () => {
 
   useEffect(() => {
     if (machineId) {
-      const m = mockBackend.getMachine(machineId);
+      const m = machines.find(m => m.id === machineId); // Get machine from context
       if (m) {
         setMachine(m);
       }
     }
     setIsLoading(false);
-  }, [machineId]);
+  }, [machineId, machines]); // Add machines to dependency array
 
   const handlePinChange = (index: number, value: string) => {
     if (!/^[0-9]$/.test(value) && value !== '') return;
@@ -44,15 +47,21 @@ const AccessRequest: React.FC = () => {
       return;
     }
     
+    if (!user?.id) {
+        setError('User not logged in.');
+        return;
+    }
+
     setIsValidating(true);
     setError(null);
 
     try {
-      const success = await mockBackend.validateAndActivate(
+      const success = await validateAndActivateFirebase(
         machineId,
         pin.join(''),
         duration,
-        unit
+        unit,
+        user.id // Pass the current user's ID as borrowerId
       );
 
       if (success) {
@@ -63,6 +72,7 @@ const AccessRequest: React.FC = () => {
         document.getElementById('pin-0')?.focus();
       }
     } catch (e) {
+      console.error("Error during PIN validation and activation:", e);
       setError('An unexpected error occurred. Please try again.');
     } finally {
       setIsValidating(false);

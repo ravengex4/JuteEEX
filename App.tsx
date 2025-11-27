@@ -16,7 +16,9 @@ import DynamicStatusWidget from './components/DynamicStatusWidget';
 import { Machine, RunLog, MarketplaceItem, CartItem, WishlistItem, User, UserRole } from './types';
 import { auth } from './services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { mockBackend } from './services/mockBackend';
+import { db, initializeMachines } from './services/firebase'; // Import db and initializeMachines
+import { doc, getDoc, setDoc, collection, query, onSnapshot } from 'firebase/firestore'; // Import Firestore functions
+// import { mockBackend } from './services/mockBackend'; // Remove mockBackend import
 
 // --- Context ---
 type ThemeMode = 'light' | 'dark' | 'system';
@@ -121,7 +123,7 @@ const AppContent: React.FC = () => {
 
 const App: React.FC = () => {
   const [machines, setMachines] = useState<Machine[]>([]);
-  const [runLogs, setRunLogs] = useState<RunLog[]>([]);
+  const [runLogs, setRunLogs] = useState<RunLog[]>([]); // runLogs will still come from RTDB or a separate Firestore collection
   const [user, setUser] = useState<User | null>(null);
   const [activeMachineId, setActiveMachineId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -141,26 +143,48 @@ const App: React.FC = () => {
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = mockBackend.subscribe((data) => {
-      setMachines([...data.machines]);
-      setRunLogs([...data.runLogs]);
+    // Initialize machines in Firestore (runs only once if collection is empty)
+    initializeMachines();
+
+    // Firestore listener for machines
+    const machinesColRef = collection(db, 'machines');
+    const machinesQuery = query(machinesColRef);
+    const unsubscribeMachines = onSnapshot(machinesQuery, (snapshot) => {
+      const fetchedMachines: Machine[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Machine[];
+      setMachines(fetchedMachines);
     });
 
-    const authUnsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
-        // Try to find the user in our mock backend data
-        const mockUser = mockBackend.findUserByEmail(firebaseUser.email || '');
+    // Firestore listener for runLogs
+    const runLogsColRef = collection(db, 'runLogs');
+    const runLogsQuery = query(runLogsColRef);
+    const unsubscribeRunLogs = onSnapshot(runLogsQuery, (snapshot) => {
+      const fetchedRunLogs: RunLog[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as RunLog[];
+      setRunLogs(fetchedRunLogs);
+    });
 
-        if (mockUser) {
-          setUser(mockUser);
+    const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        const docSnap = await getDoc(userRef);
+
+        if (docSnap.exists()) {
+          // User exists in Firestore, use their data
+          setUser(docSnap.data() as User);
         } else {
-          // If not found in mock backend, create a new User object with default role
+          // New user, create a profile in Firestore
           const newUser: User = {
             id: firebaseUser.uid,
-            name: firebaseUser.displayName || firebaseUser.email || 'Anonymous',
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous',
             email: firebaseUser.email || 'unknown@example.com',
-            role: UserRole.BORROWER, // Default role for new or unmatched Firebase users
+            role: UserRole.BORROWER, // Default role for new users
           };
+          await setDoc(userRef, newUser);
           setUser(newUser);
         }
       } else {
@@ -170,7 +194,8 @@ const App: React.FC = () => {
     });
 
     return () => {
-      unsubscribe();
+      unsubscribeMachines();
+      unsubscribeRunLogs(); // Unsubscribe from runLogs listener
       authUnsubscribe();
     };
   }, []);

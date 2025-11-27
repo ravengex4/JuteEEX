@@ -5,7 +5,8 @@ import AnalogGauge from '../components/AnalogGauge';
 import { ReverseIcon, PlayIcon, StopIcon, AlertIcon, ShareIcon } from '../components/Icons';
 import { MachineMode, RentalSession, UserRole } from '../types';
 import { MODE_CONFIG } from '../constants';
-import { mockBackend } from '../services/mockBackend';
+import { toggleMachineStateFirebase, setModeFirebase, setSpeedFirebase, triggerAntiJamFirebase } from '../services/firebase'; // Import Firebase functions
+// import { mockBackend } from '../services/mockBackend'; // Remove mockBackend
 
 const RentalTimer: React.FC<{ session: RentalSession }> = ({ session }) => {
   const [timeLeft, setTimeLeft] = useState('');
@@ -83,31 +84,31 @@ const RunningControl: React.FC = () => {
     backgroundColor: `${themeColor}${bgAlpha}`,
   };
 
-  const handleToggleRun = () => {
+  const handleToggleRun = async () => {
     if (isLocked) return;
     if (navigator.vibrate) navigator.vibrate(80);
-    mockBackend.toggleMachineState(machine.id);
+    await toggleMachineStateFirebase(machine.id);
   };
 
-  const handleModeChange = (mode: MachineMode) => {
+  const handleModeChange = async (mode: MachineMode) => {
     if (isLocked) return;
     if (navigator.vibrate) navigator.vibrate(80);
 
     if (mode === MachineMode.POWER && machine.currentMode !== MachineMode.POWER) {
       setShowPowerConfirm(true);
     } else {
-      mockBackend.setMode(machine.id, mode);
+      await setModeFirebase(machine.id, mode);
     }
   };
 
-  const confirmPowerMode = () => {
+  const confirmPowerMode = async () => {
     if (isLocked) return;
     if (navigator.vibrate) navigator.vibrate(80);
-    mockBackend.setMode(machine.id, MachineMode.POWER);
+    await setModeFirebase(machine.id, MachineMode.POWER);
     setShowPowerConfirm(false);
   };
 
-  const handleSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSpeedChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isLocked) return;
     let newVal = parseInt(e.target.value);
     const oldVal = lastSpeedRef.current;
@@ -123,21 +124,21 @@ const RunningControl: React.FC = () => {
     lastSpeedRef.current = newVal;
     
     if (machine.currentMode === MachineMode.AUTO) {
-       if (newVal > 65) mockBackend.setMode(machine.id, MachineMode.POWER);
-       else mockBackend.setMode(machine.id, MachineMode.ECO);
+       if (newVal > 65) await setModeFirebase(machine.id, MachineMode.POWER);
+       else await setModeFirebase(machine.id, MachineMode.ECO);
     }
 
-    if (machine.currentMode === MachineMode.ECO && newVal > 65) mockBackend.setMode(machine.id, MachineMode.POWER);
-    if (machine.currentMode === MachineMode.POWER && newVal < 50) mockBackend.setMode(machine.id, MachineMode.ECO);
+    if (machine.currentMode === MachineMode.ECO && newVal > 65) await setModeFirebase(machine.id, MachineMode.POWER);
+    if (machine.currentMode === MachineMode.POWER && newVal < 50) await setModeFirebase(machine.id, MachineMode.ECO);
 
-    mockBackend.setSpeed(machine.id, newVal);
+    await setSpeedFirebase(machine.id, newVal);
   };
 
-  const handleAntiJam = () => {
+  const handleAntiJam = async () => {
     if (isLocked || isReversing) return;
     if (navigator.vibrate) navigator.vibrate([80, 50, 80]); 
     
-    mockBackend.triggerAntiJam(machine.id);
+    await triggerAntiJamFirebase(machine.id);
     setIsReversing(true);
     
     setShowToast(true);
