@@ -143,41 +143,54 @@ const App: React.FC = () => {
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
+    console.log("App useEffect: Initializing...");
+
     // Initialize machines in Firestore (runs only once if collection is empty)
-    initializeMachines();
+    initializeMachines().then(() => {
+      console.log("initializeMachines completed.");
+    }).catch(e => {
+      console.error("initializeMachines failed:", e);
+    });
 
     // Firestore listener for machines
     const machinesColRef = collection(db, 'machines');
     const machinesQuery = query(machinesColRef);
     const unsubscribeMachines = onSnapshot(machinesQuery, (snapshot) => {
+      console.log("machines onSnapshot fired. Number of machines:", snapshot.docs.length);
       const fetchedMachines: Machine[] = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as Machine[];
       setMachines(fetchedMachines);
+    }, (error) => {
+      console.error("machines onSnapshot failed:", error);
     });
 
     // Firestore listener for runLogs
     const runLogsColRef = collection(db, 'runLogs');
     const runLogsQuery = query(runLogsColRef);
     const unsubscribeRunLogs = onSnapshot(runLogsQuery, (snapshot) => {
+      console.log("runLogs onSnapshot fired. Number of runLogs:", snapshot.docs.length);
       const fetchedRunLogs: RunLog[] = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as RunLog[];
       setRunLogs(fetchedRunLogs);
+    }, (error) => {
+      console.error("runLogs onSnapshot failed:", error);
     });
 
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log("onAuthStateChanged fired. firebaseUser:", firebaseUser);
       if (firebaseUser) {
         const userRef = doc(db, 'users', firebaseUser.uid);
         const docSnap = await getDoc(userRef);
 
         if (docSnap.exists()) {
-          // User exists in Firestore, use their data
+          console.log("User exists in Firestore:", docSnap.data());
           setUser(docSnap.data() as User);
         } else {
-          // New user, create a profile in Firestore
+          console.log("New user, creating profile in Firestore for:", firebaseUser.email);
           const newUser: User = {
             id: firebaseUser.uid,
             name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous',
@@ -188,14 +201,20 @@ const App: React.FC = () => {
           setUser(newUser);
         }
       } else {
+        console.log("No Firebase user logged in.");
         setUser(null);
       }
       setLoading(false); // Set loading to false after auth state is determined
+      console.log("setLoading(false) called.");
+    }, (error) => {
+      console.error("onAuthStateChanged failed:", error);
+      setLoading(false); // Ensure loading is false even on auth error
     });
 
     return () => {
+      console.log("App useEffect cleanup.");
       unsubscribeMachines();
-      unsubscribeRunLogs(); // Unsubscribe from runLogs listener
+      unsubscribeRunLogs();
       authUnsubscribe();
     };
   }, []);
