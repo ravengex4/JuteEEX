@@ -197,12 +197,8 @@ const App: React.FC = () => {
       console.error("runLogs onSnapshot failed:", error);
     });
 
-    let loadingTimeout: NodeJS.Timeout;
-
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log("onAuthStateChanged fired. firebaseUser:", firebaseUser);
-      // Clear the loading timeout if auth state resolves successfully
-      clearTimeout(loadingTimeout);
 
       try {
         if (firebaseUser) {
@@ -229,31 +225,16 @@ const App: React.FC = () => {
         }
       } catch (error) {
         console.error("Error during user data handling in onAuthStateChanged:", error);
-        setInitialLoadError(true); // Set error if user data handling fails
-        // Optionally, show a more prominent error message to the user
+        // Do not set initialLoadError to true, just log the error and proceed.
       } finally {
         setLoading(false); // Ensure loading is false after auth state and user data are processed
         console.log("setLoading(false) called.");
       }
     }, (error) => {
       console.error("onAuthStateChanged failed:", error);
-      clearTimeout(loadingTimeout); // Clear timeout even on auth error
       setInitialLoadError(true); // Set error on auth state failure
       setLoading(false); // Ensure loading is false even on auth error
     });
-
-    // Set a timeout for initial loading (e.g., 10 seconds)
-    loadingTimeout = setTimeout(() => {
-      // Check both `loading` state and if `initialLoadError` is not already true
-      // to avoid overwriting a more specific error
-      if (loading && !initialLoadError) { 
-        console.warn("Loading timeout reached. Forcing loading state to false and setting initial load error.");
-        setLoading(false);
-        setInitialLoadError(true); // Set initial load error
-        // Optionally, set an error message or redirect to login here
-      }
-    }, 10000); // 10 seconds
-
 
     return () => {
       console.log("App useEffect cleanup.");
