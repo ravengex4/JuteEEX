@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { auth } from '../services/firebase';
+import { auth, firebaseInitialized } from '../services/firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 
 const Login: React.FC = () => {
@@ -10,6 +10,10 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
 
   const handleSignUp = async () => {
+    if (!firebaseInitialized || !auth) {
+      setError("Firebase is not initialized. Cannot sign up.");
+      return;
+    }
     try {
       await createUserWithEmailAndPassword(auth, email, password);
       setError(null);
@@ -20,6 +24,10 @@ const Login: React.FC = () => {
   };
 
   const handleSignIn = async () => {
+    if (!firebaseInitialized || !auth) {
+      setError("Firebase is not initialized. Cannot sign in.");
+      return;
+    }
     try {
       await signInWithEmailAndPassword(auth, email, password);
       setError(null);

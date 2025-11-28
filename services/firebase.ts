@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
-import { getFirestore, collection, getDocs, addDoc, serverTimestamp, query, where, deleteDoc, updateDoc, doc, getDoc as getFirestoreDoc } from "firebase/firestore";
+import { getFirestore, collection, getDocs, addDoc, serverTimestamp, query, where, deleteDoc, updateDoc, doc, getDoc as getFirestoreDoc, setDoc } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
 import { SAMPLE_MACHINES } from "../constants";
 import { Machine, UserRole, RunLog, MachineMode } from "../types"; // Import Machine, UserRole, RunLog, MachineMode
@@ -21,34 +21,78 @@ const firebaseConfig = {
   measurementId: "G-H2NRRG19Z1"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const rtdb = getDatabase(app);
+let app;
+let analytics;
+let auth;
+let db;
+let rtdb;
+let firebaseInitialized = false; // Keep this false
+
+console.log("firebase.ts: Attempting Firebase initialization...");
+try {
+  console.log("firebase.ts: Calling initializeApp with config:", firebaseConfig);
+  app = initializeApp(firebaseConfig);
+  console.log("firebase.ts: initializeApp successful. App instance:", app);
+
+  console.log("firebase.ts: Calling getAnalytics...");
+  analytics = getAnalytics(app);
+  console.log("firebase.ts: getAnalytics successful.");
+
+  console.log("firebase.ts: Calling getAuth...");
+  auth = getAuth(app);
+  console.log("firebase.ts: getAuth successful.");
+
+  console.log("firebase.ts: Calling getFirestore...");
+  db = getFirestore(app);
+  console.log("firebase.ts: getFirestore successful.");
+
+  console.log("firebase.ts: Calling getDatabase...");
+  rtdb = getDatabase(app);
+  console.log("firebase.ts: getDatabase successful.");
+
+  firebaseInitialized = true; // This will now remain false
+  console.log("Firebase.ts: Firebase successfully initialized. firebaseInitialized =", firebaseInitialized);
+} catch (error) {
+  console.error("Firebase.ts: FATAL ERROR during Firebase initialization:", error);
+  firebaseInitialized = false; // Ensure this is false on error
+}
 
 // Function to initialize machines in Firestore
 const initializeMachines = async () => {
+  if (!firebaseInitialized || !db) {
+    console.error("Firestore not initialized. Cannot initialize machines.");
+    return;
+  }
+  console.log("initializeMachines: checking machines collection...");
   const machinesCol = collection(db, 'machines');
   const machineSnapshot = await getDocs(machinesCol);
 
   if (machineSnapshot.empty) {
-    console.log("Initializing sample machines in Firestore...");
+    console.log("initializeMachines: machines collection is empty. Initializing sample machines...");
     for (const machine of SAMPLE_MACHINES) {
       // Ensure machine ID is used as doc ID
       const { id, ...machineData } = machine;
+      // You'll need `setDoc` here, which needs to be imported or defined
+      // For now, I'll assume setDoc is available or will be added
+      // await setDoc(doc(machinesCol, id), {
+      //   ...machineData,
+      //   createdAt: serverTimestamp(),
+      //   updatedAt: serverTimestamp(),
+      // });
       await setDoc(doc(machinesCol, id), {
         ...machineData,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
     }
-    console.log("Sample machines initialized.");
+    console.log("initializeMachines: Sample machines initialized.");
+  } else {
+    console.log("initializeMachines: machines collection already contains data.");
   }
 };
 
 const generatePinFirebase = async (machineId: string): Promise<{ pin: string; expiry: number }> => {
+  if (!firebaseInitialized || !db) throw new Error("Firebase not initialized.");
   const pin = Math.floor(100000 + Math.random() * 900000).toString();
   const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
 
@@ -69,30 +113,26 @@ const validateAndActivateFirebase = async (
   unit: 'HOURS' | 'DAYS',
   borrowerId: string
 ): Promise<boolean> => {
+  if (!firebaseInitialized || !db) throw new Error("Firebase not initialized.");
   // Query for the PIN
   const q = query(collection(db, 'activePins'), where('machineId', '==', machineId), where('pin', '==', pin));
   const querySnapshot = await getDocs(q);
 
-  if (querySnapshot.empty && pin !== '123456') { // Allow '123456' for testing, similar to mock
+  if (querySnapshot.empty) {
     return false;
   }
 
-  let pinDoc;
-  if (pin !== '123456') {
-    pinDoc = querySnapshot.docs[0];
-    const pinData = pinDoc.data();
+  const pinDoc = querySnapshot.docs[0];
+  const pinData = pinDoc.data();
 
     // Check expiry
-    if (pinData.expiry < Date.now()) {
-      await deleteDoc(pinDoc.ref); // Delete expired PIN
-      return false;
-    }
+  if (pinData.expiry < Date.now()) {
+    await deleteDoc(pinDoc.ref); // Delete expired PIN
+    return false;
   }
 
-  // Delete the PIN document (if it's not the test PIN)
-  if (pinDoc) {
-    await deleteDoc(pinDoc.ref);
-  }
+  // PIN is valid, delete it
+  await deleteDoc(pinDoc.ref);
 
   // Update machine rental status
   const machineRef = doc(db, 'machines', machineId);
@@ -111,6 +151,7 @@ const validateAndActivateFirebase = async (
 };
 
 const addRunLogFirebase = async (runLog: Omit<RunLog, 'id'>) => {
+  if (!firebaseInitialized || !db) throw new Error("Firebase not initialized.");
   await addDoc(collection(db, 'runLogs'), {
     ...runLog,
     createdAt: serverTimestamp(),
@@ -118,6 +159,7 @@ const addRunLogFirebase = async (runLog: Omit<RunLog, 'id'>) => {
 };
 
 const toggleMachineStateFirebase = async (machineId: string) => {
+  if (!firebaseInitialized || !db) throw new Error("Firebase not initialized.");
   const machineRef = doc(db, 'machines', machineId);
   const machineSnap = await getFirestoreDoc(machineRef);
 
@@ -165,6 +207,7 @@ const toggleMachineStateFirebase = async (machineId: string) => {
 };
 
 const setModeFirebase = async (machineId: string, mode: MachineMode) => {
+  if (!firebaseInitialized || !db) throw new Error("Firebase not initialized.");
   const machineRef = doc(db, 'machines', machineId);
   await updateDoc(machineRef, {
     currentMode: mode,
@@ -173,6 +216,7 @@ const setModeFirebase = async (machineId: string, mode: MachineMode) => {
 };
 
 const setSpeedFirebase = async (machineId: string, speed: number) => {
+  if (!firebaseInitialized || !db) throw new Error("Firebase not initialized.");
   const machineRef = doc(db, 'machines', machineId);
   await updateDoc(machineRef, {
     'telemetry.speed': speed,
@@ -181,6 +225,7 @@ const setSpeedFirebase = async (machineId: string, speed: number) => {
 };
 
 const triggerAntiJamFirebase = async (machineId: string) => {
+  if (!firebaseInitialized || !db) throw new Error("Firebase not initialized.");
   const machineRef = doc(db, 'machines', machineId);
   const machineSnap = await getFirestoreDoc(machineRef);
 
@@ -197,5 +242,5 @@ const triggerAntiJamFirebase = async (machineId: string) => {
   });
 };
 
-export { app, analytics, auth, db, rtdb, initializeMachines, generatePinFirebase, validateAndActivateFirebase, addRunLogFirebase, toggleMachineStateFirebase, setModeFirebase, setSpeedFirebase, triggerAntiJamFirebase };
+export { app, analytics, auth, db, rtdb, firebaseInitialized, initializeMachines, generatePinFirebase, validateAndActivateFirebase, addRunLogFirebase, toggleMachineStateFirebase, setModeFirebase, setSpeedFirebase, triggerAntiJamFirebase };
 

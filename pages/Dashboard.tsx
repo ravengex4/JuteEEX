@@ -3,12 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../App';
 import { PlayIcon, StopIcon, HelpIcon, ShareIcon } from '../components/Icons';
 import { Machine, UserRole } from '../types';
-import { mockBackend } from '../services/mockBackend';
 import { MODE_CONFIG } from '../constants';
 
 const MachineCard: React.FC<{ machine: Machine }> = ({ machine }) => {
   const navigate = useNavigate();
-  const { user } = useApp();
+  const { user, toggleMachineState } = useApp();
   const isRunning = machine.status === 'RUNNING';
   const modeConfig = MODE_CONFIG[machine.currentMode];
 
@@ -18,7 +17,7 @@ const MachineCard: React.FC<{ machine: Machine }> = ({ machine }) => {
   const toggleMachine = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (navigator.vibrate) navigator.vibrate(80);
-    mockBackend.toggleMachineState(machine.id);
+    toggleMachineState(machine.id);
   };
   
   const handleShare = (e: React.MouseEvent) => {

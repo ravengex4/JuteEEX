@@ -16,9 +16,8 @@ import DynamicStatusWidget from './components/DynamicStatusWidget';
 import { Machine, RunLog, MarketplaceItem, CartItem, WishlistItem, User, UserRole } from './types';
 import { auth } from './services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { db, initializeMachines } from './services/firebase'; // Import db and initializeMachines
+import { db, initializeMachines, firebaseInitialized, toggleMachineStateFirebase } from './services/firebase'; // Import db, initializeMachines, and firebaseInitialized
 import { doc, getDoc, setDoc, collection, query, onSnapshot } from 'firebase/firestore'; // Import Firestore functions
-// import { mockBackend } from './services/mockBackend'; // Remove mockBackend import
 
 // --- Context ---
 type ThemeMode = 'light' | 'dark' | 'system';
@@ -40,6 +39,8 @@ interface AppContextType {
   removeFromWishlist: (itemId: string) => void;
   user: User | null;
   loading: boolean;
+  initialLoadError: boolean; // Add initialLoadError to context
+  toggleMachineState: (machineId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -129,6 +130,7 @@ const App: React.FC = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [loading, setLoading] = useState(true); // Add loading state
+  const [initialLoadError, setInitialLoadError] = useState(false); // New state for initial load error
   
   // Theme state with persistence
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -143,13 +145,28 @@ const App: React.FC = () => {
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
-    console.log("App useEffect: Initializing...");
+    console.log("App.tsx useEffect: Starting application setup.");
+
+    if (!firebaseInitialized) {
+      console.error("App.tsx useEffect: Firebase was NOT initialized (firebaseInitialized is false). Proceeding without Firebase.");
+      setLoading(false);
+      return () => {
+        console.log("App.tsx useEffect cleanup (early exit due to no Firebase).");
+      };
+    }
+    console.log("App.tsx useEffect: Firebase is initialized. Continuing application setup.");
 
     // Initialize machines in Firestore (runs only once if collection is empty)
-    initializeMachines().then(() => {
-      console.log("initializeMachines completed.");
+    console.log("App.tsx useEffect: Calling initializeMachines...");
+    const initMachinesPromise = initializeMachines();
+
+    // Now, await this promise within an async IIFE or separate async function if needed for sequence,
+    // or just let it run in parallel with other listeners and handle its errors.
+    // For now, we'll let it run and handle its own completion/errors via the .then/.catch.
+    initMachinesPromise.then(() => {
+        console.log("initializeMachines call in App.tsx's useEffect has completed.");
     }).catch(e => {
-      console.error("initializeMachines failed:", e);
+        console.error("initializeMachines call in App.tsx's useEffect encountered an error:", e);
     });
 
     // Firestore listener for machines
@@ -180,36 +197,63 @@ const App: React.FC = () => {
       console.error("runLogs onSnapshot failed:", error);
     });
 
+    let loadingTimeout: NodeJS.Timeout;
+
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log("onAuthStateChanged fired. firebaseUser:", firebaseUser);
-      if (firebaseUser) {
-        const userRef = doc(db, 'users', firebaseUser.uid);
-        const docSnap = await getDoc(userRef);
+      // Clear the loading timeout if auth state resolves successfully
+      clearTimeout(loadingTimeout);
 
-        if (docSnap.exists()) {
-          console.log("User exists in Firestore:", docSnap.data());
-          setUser(docSnap.data() as User);
+      try {
+        if (firebaseUser) {
+          const userRef = doc(db, 'users', firebaseUser.uid);
+          const docSnap = await getDoc(userRef);
+
+          if (docSnap.exists()) {
+            console.log("User exists in Firestore:", docSnap.data());
+            setUser(docSnap.data() as User);
+          } else {
+            console.log("New user, creating profile in Firestore for:", firebaseUser.email);
+            const newUser: User = {
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous',
+              email: firebaseUser.email || 'unknown@example.com',
+              role: UserRole.BORROWER, // Default role for new users
+            };
+            await setDoc(userRef, newUser);
+            setUser(newUser);
+          }
         } else {
-          console.log("New user, creating profile in Firestore for:", firebaseUser.email);
-          const newUser: User = {
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous',
-            email: firebaseUser.email || 'unknown@example.com',
-            role: UserRole.BORROWER, // Default role for new users
-          };
-          await setDoc(userRef, newUser);
-          setUser(newUser);
+          console.log("No Firebase user logged in.");
+          setUser(null);
         }
-      } else {
-        console.log("No Firebase user logged in.");
-        setUser(null);
+      } catch (error) {
+        console.error("Error during user data handling in onAuthStateChanged:", error);
+        setInitialLoadError(true); // Set error if user data handling fails
+        // Optionally, show a more prominent error message to the user
+      } finally {
+        setLoading(false); // Ensure loading is false after auth state and user data are processed
+        console.log("setLoading(false) called.");
       }
-      setLoading(false); // Set loading to false after auth state is determined
-      console.log("setLoading(false) called.");
     }, (error) => {
       console.error("onAuthStateChanged failed:", error);
+      clearTimeout(loadingTimeout); // Clear timeout even on auth error
+      setInitialLoadError(true); // Set error on auth state failure
       setLoading(false); // Ensure loading is false even on auth error
     });
+
+    // Set a timeout for initial loading (e.g., 10 seconds)
+    loadingTimeout = setTimeout(() => {
+      // Check both `loading` state and if `initialLoadError` is not already true
+      // to avoid overwriting a more specific error
+      if (loading && !initialLoadError) { 
+        console.warn("Loading timeout reached. Forcing loading state to false and setting initial load error.");
+        setLoading(false);
+        setInitialLoadError(true); // Set initial load error
+        // Optionally, set an error message or redirect to login here
+      }
+    }, 10000); // 10 seconds
+
 
     return () => {
       console.log("App useEffect cleanup.");
@@ -277,6 +321,15 @@ const App: React.FC = () => {
     setWishlist(prev => prev.filter(i => i.id !== itemId));
   };
 
+  const toggleMachineState = async (machineId: string) => {
+    try {
+      await toggleMachineStateFirebase(machineId);
+    } catch (error) {
+      console.error("Error toggling machine state:", error);
+      // Optionally, set some error state to show in the UI
+    }
+  };
+
   return (
     <AppContext.Provider value={{ 
         machines, 
@@ -294,12 +347,20 @@ const App: React.FC = () => {
         addToWishlist,
         removeFromWishlist,
         user,
-        loading // Pass loading state to context
+        loading, // Pass loading state to context
+        initialLoadError, // Pass initialLoadError to context
+        toggleMachineState
     }}>
       <Router>
         {loading ? (
           <div className="flex justify-center items-center min-h-screen text-jute-darkGreen dark:text-jute-white">
             Loading application...
+          </div>
+        ) : initialLoadError ? (
+          <div className="flex flex-col justify-center items-center min-h-screen text-red-600 dark:text-red-400 p-4 text-center">
+            <h2 className="text-xl font-bold mb-2">Application Failed to Load</h2>
+            <p>We're sorry, but the application encountered an error during startup. Please try again later.</p>
+            <p>If the problem persists, please contact support.</p>
           </div>
         ) : (
           <AppContent />

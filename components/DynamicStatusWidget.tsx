@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Machine, MachineMode } from '../types';
 import { PlayIcon, StopIcon } from './Icons';
 import { MODE_CONFIG } from '../constants';
-import { mockBackend } from '../services/mockBackend';
+import { useApp } from '../App';
 
 interface DynamicStatusWidgetProps {
   machines: Machine[];
@@ -14,6 +14,7 @@ const DynamicStatusWidget: React.FC<DynamicStatusWidgetProps> = ({ machines }) =
   const [manualSelectionId, setManualSelectionId] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const { toggleMachineState } = useApp();
   const touchStartY = useRef<number | null>(null);
 
   // Close on route change
@@ -81,7 +82,7 @@ const DynamicStatusWidget: React.FC<DynamicStatusWidgetProps> = ({ machines }) =
     e.stopPropagation();
     if (primaryMachine) {
         if (navigator.vibrate) navigator.vibrate(80);
-        mockBackend.toggleMachineState(primaryMachine.id);
+        toggleMachineState(primaryMachine.id);
     }
   };
 
